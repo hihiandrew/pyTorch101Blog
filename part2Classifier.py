@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import os
-
+import time
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
@@ -108,7 +109,7 @@ def preprocess(image):
     image = image.transpose(2, 1, 0)
     return image
 
-
+# Dataset example
 class Cifar10Dataset(torch.utils.data.Dataset):
     def __init__(self, data_dir, data_size=0, transforms=None):
         files = os.listdir(data_dir)
@@ -140,3 +141,61 @@ class Cifar10Dataset(torch.utils.data.Dataset):
             image = self.transforms(image)
 
         return image, label
+
+# Dataloader example (preferred method)
+
+trainset = Cifar10Dataset(data_dir = "cifar/train/", transforms=None)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
+
+testset = Cifar10Dataset(data_dir = "cifar/test/", transforms=None)
+testloader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=True, num_workers=2)
+
+# Train and Evaluate
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")     #Check whether a GPU is present.
+
+clf = ResNet()
+clf.to(device)   #Put the network on GPU if present
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(clf.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 200], gamma=0.1)
+
+for epoch in range(10):
+    losses = []
+    scheduler.step()
+    # Train
+    start = time.time()
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        optimizer.zero_grad()  # Zero the gradients
+
+        outputs = clf(inputs)  # Forward pass
+        loss = criterion(outputs, targets)  # Compute the Loss
+        loss.backward()  # Compute the Gradients
+
+        optimizer.step()  # Updated the weights
+        losses.append(loss.item())
+        end = time.time()
+
+        if batch_idx % 100 == 0:
+            print('Batch Index : %d Loss : %.3f Time : %.3f seconds ' % (batch_idx, np.mean(losses), end - start))
+
+            start = time.time()
+        # Evaluate
+    clf.eval()
+    total = 0
+    correct = 0
+
+    with torch.no_grad():
+        for batch_idx, (inputs, targets) in enumerate(testloader):
+            inputs, targets = inputs.to(device), targets.to(device)
+
+            outputs = clf(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+            total += targets.size(0)
+            correct += predicted.eq(targets.data).cpu().sum()
+
+        print('Epoch : %d Test Acc : %.3f' % (epoch, 100. * correct / total))
+        print('--------------------------------------------------------------')
+    clf.train()
